@@ -16,7 +16,7 @@ use svg::node::element::{Element, Mask, Rectangle, Text as TextElement};
 use svg::node::{NodeDefaultHash, Text, Value};
 use svg::{Document, Node};
 
-const TSPAN_TAG: &'static str = "tspan";
+const TSPAN_TAG: &str = "tspan";
 
 #[derive(Clone, Debug)]
 pub struct TSpan {
@@ -30,7 +30,7 @@ impl TSpan {
         }
     }
 
-    pub fn add<T>(mut self, node: T) -> Self
+    pub fn append<T>(mut self, node: T) -> Self
     where
         T: Node,
     {
@@ -89,9 +89,9 @@ impl Display for TSpan {
     }
 }
 
-impl Into<Element> for TSpan {
-    fn into(self) -> Element {
-        self.inner
+impl From<TSpan> for Element {
+    fn from(val: TSpan) -> Self {
+        val.inner
     }
 }
 
@@ -120,7 +120,16 @@ fn default_height() -> u32 {
 }
 
 fn print_entry(entry: Entry) -> Result<(), Error> {
-    println!("{}", to_string(&entry)?);
+    let s = format!("{:.2}", entry.time);
+    let t: f64 = s.parse().unwrap();
+    println!(
+        "{}",
+        to_string(&Entry {
+            time: t,
+            event_type: entry.event_type,
+            event_data: entry.event_data,
+        })?
+    );
     Ok(())
 }
 
@@ -180,14 +189,13 @@ fn echo_console_line(
 ) -> Result<Vec<String>, Error> {
     *time += step;
 
-    let prompt_line: String;
     let mut preview_lines: Vec<String> = vec![];
-
     preview_lines.push(prompt.to_string());
-    if prompt != "" {
-        prompt_line = format!("\x1b[32m{}\x1b[0m$ ", prompt);
+
+    let prompt_line: String = if !prompt.is_empty() {
+        format!("\x1b[32m{}\x1b[0m$ ", prompt)
     } else {
-        prompt_line = "$ ".to_string();
+        "$ ".to_string()
     };
 
     print_entry(Entry {
@@ -259,10 +267,10 @@ fn main() -> Result<(), Error> {
     let mut first_line = String::new();
     first_reader.read_line(&mut first_line)?;
 
-    let header: ScenarioHeader = if first_line.starts_with("#! ") {
-        from_str(&first_line[3..])?
+    let header: ScenarioHeader = if let Some(stripped) = first_line.strip_prefix("#! ") {
+        from_str(stripped)?
     } else {
-        from_str(&"{}")?
+        from_str("{}")?
     };
     let asciicast_header = Header {
         version: 2,
@@ -290,27 +298,27 @@ fn main() -> Result<(), Error> {
             continue;
 
         // lines starting with "#timeout: " will create defined timeout
-        } else if line.starts_with("#timeout:") {
+        } else if let Some(stripped) = line.strip_prefix("#timeout:") {
             {
-                let timeout: f64 = line[9..].trim().parse()?;
+                let timeout: f64 = stripped.trim().parse()?;
                 time += timeout;
             }
 
         // skip lines starting with "#"
-        } else if line.starts_with("#") {
+        } else if line.starts_with('#') {
             continue;
 
         // lines starting with "$ " display as console lines
-        } else if line.starts_with("$ ") {
-            preview_lines.push(echo_console_line(&mut time, &header.step, "", &line[2..])?);
+        } else if let Some(stripped) = line.strip_prefix("$ ") {
+            preview_lines.push(echo_console_line(&mut time, &header.step, "", stripped)?);
 
         // lines starting with "(nix-shell) $ " display as console lines
-        } else if line.starts_with("(nix-shell) $ ") {
+        } else if let Some(stripped) = line.strip_prefix("(nix-shell) $ ") {
             preview_lines.push(echo_console_line(
                 &mut time,
                 &header.step,
                 "(nix-shell) ",
-                &line[14..],
+                stripped,
             )?);
 
         // lines starting with "--" will clear display
@@ -324,7 +332,7 @@ fn main() -> Result<(), Error> {
         // everything else print immediately
         } else {
             print_entry(Entry {
-                time: time,
+                time,
                 event_type: EventType::Output,
                 event_data: format!("{}\r\n", line.clone()),
             })?;
@@ -359,22 +367,23 @@ fn main() -> Result<(), Error> {
                 let mut tspan = TSpan::new().set("x", "0").set("dy", "1.2em");
 
                 for item in preview_line {
-                    if item == "" {
-                        tspan = tspan.add(Text::new("$ ".to_string()));
+                    if item.is_empty() {
+                        tspan = tspan.append(Text::new("$ ".to_string()));
                     } else {
-                        let parts: Vec<&str> = item.splitn(2, "#").collect();
+                        let parts: Vec<&str> = item.splitn(2, '#').collect();
                         if parts.len() == 1 {
-                            tspan = tspan.add(Text::new(encode_safe(parts[0])));
+                            tspan = tspan.append(Text::new(encode_safe(parts[0])));
                         } else {
-                            tspan = tspan.add(Text::new(encode_safe(parts[0])));
-                            tspan = tspan.add(TSpan::new().set("class", "fg-15").add(Text::new(
-                                encode_safe(parts.clone().split_off(1).join("").as_str()),
-                            )));
+                            tspan = tspan.append(Text::new(encode_safe(parts[0])));
+                            tspan =
+                                tspan.append(TSpan::new().set("class", "fg-15").append(Text::new(
+                                    encode_safe(parts.clone().split_off(1).join("").as_str()),
+                                )));
                         }
-                        tspan = tspan.add(
+                        tspan = tspan.append(
                             TSpan::new()
                                 .set("class", "fg-2")
-                                .add(Text::new(encode_safe(item.as_str()))),
+                                .append(Text::new(encode_safe(item.as_str()))),
                         );
                     }
                 }
